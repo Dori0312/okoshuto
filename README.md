@@ -53,6 +53,8 @@ tölti be a backend indulásakor. Valós személyes adatot az alkalmazás nem ha
 
 ## Használat
 
+
+
 ### Követelmények
 - Python 3.12.16
 - A függőségek pontos verziói: `requirements.txt`
@@ -64,6 +66,8 @@ python -m venv venv
 python -m pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
+
+Windows 11-en az Intelligens alkalmazásvezérlés letilthatja a pyarrow egyik DLL-jét, emiatt a Streamlit-felület nem indul (DLL load failed while importing _compute). Megoldás: a funkció kikapcsolása
 
 Megjegyzés: ha a Windows alkalmazásvezérlése letiltja a `pip.exe`, `uvicorn.exe`
 stb. indítófájlokat, minden parancs `python -m ...` formában futtatható.
