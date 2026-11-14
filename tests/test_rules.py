@@ -22,7 +22,7 @@ MA = date(2026, 11, 14)
         (MA - timedelta(days=1), ExpiryStatus.EXPIRED),       
         (MA, ExpiryStatus.EXPIRING_SOON),                     
         (MA + timedelta(days=3), ExpiryStatus.EXPIRING_SOON), 
-        (MA + timedelta(days=4), ExpiryStatus.OK),            
+        (MA + timedelta(days=4), ExpiryStatus.OK),          
     ],
 )
 def test_expiry_status(lejarat, elvart):
@@ -30,12 +30,11 @@ def test_expiry_status(lejarat, elvart):
 
 
 def test_shopping_list_normal_eset():
-    tej = ProductData(1, "Tej", quantity=1, unit="l", min_quantity=1,
+    tej = ProductData(1, "Tej", quantity=1, unit="1", min_quantity=1,
                       expiry_date=MA + timedelta(days=5))
     joghurt = ProductData(2, "Joghurt", quantity=4, unit="db", min_quantity=2,
-                          expiry_date=MA - timedelta(days=1))  # lejárt
+                          expiry_date=MA - timedelta(days=1))
     vaj = ProductData(3, "Vaj", quantity=2, unit="db", min_quantity=1, expiry_date=None)
-    # Tejből az utolsó 14 napban napi 0,5 l fogyott (összesen 7 l).
     fogyasztas = [ConsumptionData(1, 0.5, MA - timedelta(days=i)) for i in range(14)]
 
     lista = shopping_list([tej, joghurt, vaj], fogyasztas, MA)
