@@ -46,6 +46,6 @@ def get_db() -> Iterator[Session]:
 
 def init_db(target: Engine | None = None) -> None:
     """Létrehozza a hiányzó táblákat (a meglévő adatokat nem bántja)."""
-    from backend import models  # noqa: F401  # a modellek importja regisztrálja a táblákat
+    from backend import models
 
     Base.metadata.create_all(bind=target or engine)
