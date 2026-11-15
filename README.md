@@ -107,7 +107,18 @@ Külön is futtatható: `python -m backend.seed`
 ## Ellenőrzések
 - Tesztek futtatása: `python -m pytest`
 - Egységtesztek: `tests/test_rules.py` (a szabály normál esete, határesetei és hibás bemenete)
-- GitHub Actions és hibajavítás: *(készül)*
+
+- **GitHub Actions:** minden `push` és `pull_request` után lefut a teljes tesztcsomag
+  (`.github/workflows/tests.yml`, Ubuntu, Python 3.12).
+- **Dokumentált hibajavítás** (a `ci-hibademo` ágon, amely nincs a felhős telepítéshez kötve):
+  - **Tünet:** a CI elbukott; a `test_expiry_status` paraméterezett teszt határesete
+    (a ma lejáró termék) `HAMAROSAN_LEJÁR` helyett `LEJÁRT` eredményt kapott.
+    Sikertelen futás: IDE_A_PIROS_FUTÁS_LINKJE
+  - **Ok:** a `rules.expiry_status` függvényben a `expiry_date < reference_date`
+    feltétel helyett `<=` szerepelt (szándékosan előidézett „eggyel elcsúszás” hiba).
+  - **Javítás:** a feltétel visszaállítása `<`-re.
+  - **Ellenőrzés:** a CI újra lefutott, minden teszt sikeres.
+    Sikeres futás: IDE_A_ZÖLD_FUTÁS_LINKJE
 
 ## Tervezési döntések
 1. **A referencia-dátum paraméter.** A szabály a „mai napot” paraméterként kapja,
