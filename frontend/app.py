@@ -43,6 +43,12 @@ def flash_and_rerun(message: str) -> None:
 
 # --- oldalak ------------------------------------------------------------
 
+def highlight_empty(row: pd.Series) -> list[str]:
+    """Az elfogyott termék sorát pirosas háttérrel jelöli a táblázatban."""
+    style = "background-color: rgba(255, 75, 75, 0.25)" if row["Mennyiség"] == 0 else ""
+    return [style] * len(row)
+
+
 def page_fridge(api: ApiClient) -> None:
     st.header("🧊 A hűtő tartalma")
 
@@ -54,6 +60,7 @@ def page_fridge(api: ApiClient) -> None:
     col1, col2 = st.columns(2)
     category = col1.selectbox("Kategória", ["Összes", *category_ids])
     status = col2.selectbox("Státusz", ["Összes", *STATUSES])
+    show_empty = st.checkbox("Elfogyottak mutatása")
 
     products = call(
         api.get_products,
@@ -62,27 +69,31 @@ def page_fridge(api: ApiClient) -> None:
     )
     if products is None:
         return
+    empty_count = sum(1 for p in products if p["quantity"] == 0)
+    if not show_empty:
+        products = [p for p in products if p["quantity"] > 0]
     if not products:
-        if category == "Összes" and status == "Összes":
+        if category == "Összes" and status == "Összes" and empty_count == 0:
             st.info("A hűtő üres. Vegyél fel termékeket az „Új termék” menüpontban!")
         else:
             st.info("Nincs a szűrésnek megfelelő termék.")
         return
 
     df = pd.DataFrame(products)
-    m1, m2, m3 = st.columns(3)
+    m1, m2, m3, m4 = st.columns(4)
     m1.metric("Termékek", len(df))
     m2.metric("Hamarosan lejár", int((df["status"] == "HAMAROSAN_LEJÁR").sum()))
     m3.metric("Lejárt", int((df["status"] == "LEJÁRT").sum()))
+    m4.metric("Elfogyott", empty_count)
 
-    table = df[["name", "category_name", "quantity", "unit", "expiry_date", "status"]]
-    st.dataframe(
-        table.rename(columns={
+    table = df[["name", "category_name", "quantity", "unit", "expiry_date", "status"]].rename(
+        columns={
             "name": "Név", "category_name": "Kategória", "quantity": "Mennyiség",
             "unit": "Egység", "expiry_date": "Lejárat", "status": "Státusz",
-        }),
-        hide_index=True,
+        }
     )
+    styled = table.style.apply(highlight_empty, axis=1).format({"Mennyiség": "{:g}"})
+    st.dataframe(styled, hide_index=True)
 
     st.subheader("Termékek kategóriánként")
     counts = df.groupby(["category_name", "status"]).size().reset_index(name="darab")
@@ -135,8 +146,9 @@ def page_consumption(api: ApiClient) -> None:
     products = call(api.get_products)
     if products is None:
         return
+    products = [p for p in products if p["quantity"] > 0]  # elfogyottból nem lehet fogyasztani
     if not products:
-        st.info("Még nincs termék a hűtőben.")
+        st.info("Nincs olyan termék a hűtőben, amiből fogyasztani lehetne.")
         return
 
     by_id = {p["id"]: p for p in products}
