@@ -99,7 +99,18 @@ Külön is futtatható: `python -m backend.seed`
 | GET | `/health` | állapotellenőrzés |
 
 ### Felhős elérés és üzemeltetési korlátok
-*(készül)*
+- **Frontend (Streamlit Community Cloud):** https://okoshuto.streamlit.app
+- **Backend (Render):** https://okoshuto.onrender.com (API-dokumentáció: `/docs`)
+- **Adatbázis:** Render PostgreSQL 18 (Frankfurt), ingyenes csomag
+
+**Korlátok:**
+- A Render ingyenes webszolgáltatása 15 perc inaktivitás után leáll; az első kérés
+  ilyenkor kb. 1 percig tarthat. A bemutató előtt az alkalmazást el kell indítani.
+- Az ingyenes PostgreSQL-példány 30 nap után lejár, és egyszerre csak egy lehet
+  belőle. A cseréjét a karbantartó program végzi (lásd: Karbantartás).
+- A frontend a backend címét a Streamlit Cloud *Secrets* beállításából olvassa
+  (`API_BASE_URL`), a backend az adatbázis címét a Render környezeti változójából
+  (`DATABASE_URL`). Egyik sincs a kódban vagy a Git-tárolóban.
 
 ## Karbantartás
 *(készül)*
