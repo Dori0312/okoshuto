@@ -68,7 +68,7 @@ def expiry_status(
         raise ValueError("A soon_days nem lehet negatív.")
     if expiry_date is None:
         return ExpiryStatus.OK
-    if expiry_date < reference_date:
+    if expiry_date <= reference_date:
         return ExpiryStatus.EXPIRED
     if expiry_date <= reference_date + timedelta(days=soon_days):
         return ExpiryStatus.EXPIRING_SOON
