@@ -82,3 +82,21 @@ def test_hibas_kerest_ertheto_hibaval_utasit_el(client):
     assert client.post("/products", json={
         "name": "Sajt", "category_id": 1, "quantity": -1, "unit": "db",
     }).status_code == 422
+
+
+def test_kidobas_torli_a_termeket_es_a_naplojat(client, test_session_factory):
+    termek = client.post("/products", json={
+        "name": "Joghurt", "category_id": 1, "quantity": 2, "unit": "db",
+    }).json()
+    client.post(f"/products/{termek['id']}/consumptions", json={"amount": 1})
+
+    valasz = client.delete(f"/products/{termek['id']}")
+    assert valasz.status_code == 204
+
+    # A termék eltűnt, és a fogyasztási naplója is törlődött
+    assert client.get(f"/products/{termek['id']}").status_code == 404
+    with test_session_factory() as db:
+        assert db.query(ConsumptionLog).count() == 0
+
+    # Másodszori törlés: már nincs ilyen termék
+    assert client.delete(f"/products/{termek['id']}").status_code == 404

@@ -92,6 +92,11 @@ def create_product(data: ProductCreate, service: FridgeService = Depends(get_ser
     """Új termék felvétele."""
     return ProductOut.from_model(service.create_product(data), date.today())
 
+@app.delete("/products/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_product(product_id: int, service: FridgeService = Depends(get_service)) -> None:
+    """Termék törlése (kidobás) a fogyasztási naplójával együtt."""
+    service.delete_product(product_id)
+
 
 @app.post(
     "/products/{product_id}/consumptions",

@@ -166,6 +166,49 @@ def page_consumption(api: ApiClient) -> None:
         flash_and_rerun(f"Rögzítve: {amount:g} {by_id[product_id]['unit']} {by_id[product_id]['name']}")
 
 
+def page_discard(api: ApiClient) -> None:
+    st.header("🗑️ Kidobás")
+    st.caption("A kidobott termék a fogyasztási naplójával együtt végleg törlődik.")
+
+    products = call(api.get_products)
+    if products is None:
+        return
+    if not products:
+        st.info("A hűtő üres, nincs mit kidobni.")
+        return
+
+    by_id = {p["id"]: p for p in products}
+    suggested = [p["id"] for p in products if p["status"] == "LEJÁRT" or p["quantity"] == 0]
+
+    def label(product_id: int) -> str:
+        p = by_id[product_id]
+        expiry = p["expiry_date"] or "nincs lejárat"
+        return f"{p['name']} ({p['quantity']:g} {p['unit']}, {expiry}, {p['status']})"
+
+    with st.form("discard"):
+        selected = st.multiselect(
+            "Kidobandó termékek (alapból a lejártak és az elfogyottak)",
+            list(by_id),
+            default=suggested,
+            format_func=label,
+        )
+        confirmed = st.checkbox("Biztosan kidobom a kijelölt termékeket")
+        submitted = st.form_submit_button("Kidobás")
+
+    if not submitted:
+        return
+    if not selected:
+        st.warning("Nincs kijelölve termék.")
+        return
+    if not confirmed:
+        st.warning("A kidobáshoz jelöld be a megerősítő négyzetet!")
+        return
+
+    deleted = [by_id[i]["name"] for i in selected if call(api.delete_product, i)]
+    if deleted:
+        flash_and_rerun(f"Kidobva: {', '.join(deleted)}")
+
+
 def page_shopping_list(api: ApiClient) -> None:
     st.header("🛒 Bevásárlólista")
     reference_date = st.date_input("Melyik napra számoljunk?", value=date.today())
@@ -198,6 +241,7 @@ PAGES: dict[str, Callable[[ApiClient], None]] = {
     "➕ Új termék": page_new_product,
     "🍽️ Fogyasztás": page_consumption,
     "🛒 Bevásárlólista": page_shopping_list,
+    "🗑️ Kidobás": page_discard,
 }
 
 

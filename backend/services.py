@@ -82,6 +82,15 @@ class FridgeService:
         logger.info("Fogyasztás: %s %s %s", product.name, data.amount, product.unit)
         return log
 
+    def delete_product(self, product_id: int) -> None:
+        """Termék törlése (kidobás) a fogyasztási naplójával együtt."""
+        product = self.get_product(product_id)
+        name = product.name
+        self.db.delete(product)
+        self._commit()
+        logger.info("Kidobott termék: %s (id=%s)", name, product_id)
+
+
     # --- a szabály meghívása ------------------------------------------
 
     def shopping_list(

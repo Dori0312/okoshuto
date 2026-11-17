@@ -35,6 +35,11 @@ class ApiClient:
     def create_product(self, data: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/products", json=data)
 
+    def delete_product(self, product_id: int) -> bool:
+        self._request("DELETE", f"/products/{product_id}")
+        return True
+
+
     def add_consumption(
         self, product_id: int, amount: float, consumed_on: date
     ) -> dict[str, Any]:
@@ -62,6 +67,8 @@ class ApiClient:
         if response.status_code >= 400:
             logger.warning("Hibás válasz: %s %s -> %s", method, url, response.status_code)
             raise ApiError(self._error_message(response))
+        if response.status_code == 204:  # sikeres, de nincs válasz-törzs (pl. törlés)
+            return None
         return response.json()
 
     @staticmethod
