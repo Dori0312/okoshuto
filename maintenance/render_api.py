@@ -61,6 +61,10 @@ class RenderClient:
         """Egy PostgreSQL-példány adatai (állapot, lejárat, verzió, régió...)."""
         return await self._request("GET", f"/postgres/{postgres_id}")
 
+    async def get_postgres_connection_info(self, postgres_id: str) -> dict[str, Any]:
+        """A példány kapcsolódási adatai. Jelszót tartalmaz: naplózni tilos!"""
+        return await self._request("GET", f"/postgres/{postgres_id}/connection-info")
+
     async def list_postgres(self) -> list[dict[str, Any]]:
         """Az API-kulccsal elérhető PostgreSQL-példányok listája."""
         items = await self._request("GET", "/postgres", params={"limit": 100})

@@ -13,12 +13,16 @@ from pathlib import Path
 
 import httpx
 from pydantic import ValidationError
+from sqlalchemy.exc import SQLAlchemyError
 
+from backend.database import make_engine
+from maintenance.backup import create_backup, read_backup, restore_backup, verify_restore
 from maintenance.config import MaintenanceSettings
 from maintenance.decisions import DbStatus, Decision, decide, parse_render_datetime
 from maintenance.render_api import RenderApiError, RenderClient
 
 LOG_FILE = Path(__file__).with_name("maintenance.log")
+BACKUP_DIR = Path("backups")
 logger = logging.getLogger("okoshuto.maintenance")
 
 
@@ -80,6 +84,49 @@ async def check_status(settings: MaintenanceSettings) -> Decision:
     logger.info("Backend elérhető: %s | Döntés: %s – %s", backend_ok, decision.action, decision.reason)
     return decision
 
+
+def backup_and_verify(db_url: str, source_id: str) -> Path:
+    """Mentés a forrásból, majd ellenőrzés egy elkülönített, helyi próba-adatbázisban.
+
+    1. a forrás teljes tartalmának mentése JSON-fájlba (backups/ mappa)
+    2. a mentés visszaállítása egy új, üres helyi SQLite-adatbázisba
+    3. a visszaállított adatok összevetése a mentéssel
+    """
+    source = make_engine(db_url)
+    try:
+        path = create_backup(source, source_id, BACKUP_DIR)
+    finally:
+        source.dispose()
+
+    backup = read_backup(path)
+    trial_path = BACKUP_DIR / f"{path.stem}_proba.db"
+    trial = make_engine(f"sqlite:///{trial_path.as_posix()}")
+    try:
+        restore_backup(trial, backup)
+        problems = verify_restore(trial, backup)
+    finally:
+        trial.dispose()
+
+    if problems:
+        for problem in problems:
+            logger.error("Ellenőrzési hiba: %s", problem)
+        raise RuntimeError("A mentés ellenőrzése sikertelen; a próba-adatbázis megmaradt: " + str(trial_path))
+    trial_path.unlink()
+    logger.info("A mentés ellenőrizve: a helyi próbavisszaállítás sikeres.")
+    return path
+
+
+async def run_backup(settings: MaintenanceSettings) -> Path:
+    """Lekéri az adatbázis kapcsolódási címét a Render API-tól, majd ment és ellenőriz."""
+    async with RenderClient(
+        settings.render_api_key, settings.http_timeout, settings.max_retries
+    ) as render:
+        info = await render.get_postgres_connection_info(settings.render_postgres_id)
+    db_url = info["externalConnectionString"]
+    # Az adatbázis-műveletek szinkronok: külön szálon futnak, hogy ne blokkolják az eseményhurkot.
+    return await asyncio.to_thread(backup_and_verify, db_url, settings.render_postgres_id)
+
+
 async def show_resources(settings: MaintenanceSettings) -> None:
     """Kiírja, mely Render-erőforrásokat éri el az API-kulcs (beállítás ellenőrzéséhez)."""
     async with RenderClient(
@@ -108,8 +155,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Az Okoshűtő karbantartó vezérlője")
     parser.add_argument(
         "command",
-        choices=["check", "resources"],
-        help="check: egyszeri állapotellenőrzés; resources: az elérhető erőforrások listája",
+        choices=["check", "resources", "backup"],
+        help="check: állapotellenőrzés; resources: elérhető erőforrások; backup: mentés és ellenőrzés",
     )
     args = parser.parse_args()
 
@@ -121,10 +168,16 @@ def main() -> int:
         logger.error("Hiányzó vagy hibás beállítás a .env fájlban: %s", missing)
         return 2
 
-    if args.command == "check":
-        asyncio.run(check_status(settings))
-    elif args.command == "resources":
-        asyncio.run(show_resources(settings))
+    try:
+        if args.command == "check":
+            asyncio.run(check_status(settings))
+        elif args.command == "resources":
+            asyncio.run(show_resources(settings))
+        elif args.command == "backup":
+            asyncio.run(run_backup(settings))
+    except (RenderApiError, RuntimeError, OSError, SQLAlchemyError) as exc:
+        logger.error("A művelet leállt: %s", exc)
+        return 1
     return 0
 
 
