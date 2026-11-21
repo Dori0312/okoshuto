@@ -20,3 +20,8 @@ class MaintenanceSettings(BaseSettings):
     planned_maintenance_at: datetime | None = None
     http_timeout: float = 30.0
     max_retries: int = 3
+    render_owner_id: str | None = None  # csak ha a Render nem adja vissza a régi példánynál
+    poll_interval_seconds: float = 10.0
+    deploy_timeout_seconds: float = 900.0
+    postgres_timeout_seconds: float = 900.0
+    drain_seconds: float = 15.0

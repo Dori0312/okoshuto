@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import date
 
-from fastapi import Depends, FastAPI, Query, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -41,6 +41,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="Okoshűtő API", lifespan=lifespan)
 
+def require_writable() -> None:
+    """Karbantartási módban (MAINTENANCE_MODE=true) minden adatírást elutasít."""
+    if get_settings().maintenance_mode:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Karbantartás miatt az adatírás átmenetileg szünetel. Próbáld újra később!",
+        )
+
 
 def get_service(db: Session = Depends(get_db)) -> FridgeService:
     """Kérésenként egy szolgáltatásobjektum a kérés saját Session-jével."""
@@ -62,9 +70,9 @@ async def conflict_handler(request: Request, exc: ConflictError) -> JSONResponse
 # --- végpontok --------------------------------------------------------
 
 @app.get("/health")
-def health() -> dict[str, str]:
+def health() -> dict[str, str | bool]:
     """Állapotellenőrzés (nem számít az alkalmazási végpontok közé)."""
-    return {"status": "ok"}
+    return {"status": "ok", "maintenance": get_settings().maintenance_mode}
 
 
 @app.get("/products", response_model=list[ProductOut])
@@ -87,21 +95,32 @@ def get_product(product_id: int, service: FridgeService = Depends(get_service)) 
     return ProductOut.from_model(service.get_product(product_id), date.today())
 
 
-@app.post("/products", response_model=ProductOut, status_code=status.HTTP_201_CREATED)
+@app.post(
+    "/products",
+    response_model=ProductOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_writable)],
+)
+
 def create_product(data: ProductCreate, service: FridgeService = Depends(get_service)) -> ProductOut:
     """Új termék felvétele."""
     return ProductOut.from_model(service.create_product(data), date.today())
 
-@app.delete("/products/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
+@app.delete(
+    "/products/{product_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_writable)],
+)
+
 def delete_product(product_id: int, service: FridgeService = Depends(get_service)) -> None:
     """Termék törlése (kidobás) a fogyasztási naplójával együtt."""
     service.delete_product(product_id)
-
 
 @app.post(
     "/products/{product_id}/consumptions",
     response_model=ConsumptionOut,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_writable)],
 )
 def add_consumption(
     product_id: int, data: ConsumptionCreate, service: FridgeService = Depends(get_service)

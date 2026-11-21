@@ -71,9 +71,31 @@ class RenderClient:
         return [item.get("postgres", item) for item in items]
 
 
+    async def create_postgres(self, spec: dict[str, Any]) -> dict[str, Any]:
+        """Új PostgreSQL-példány létrehozása (név, tulajdonos, csomag, verzió, régió...)."""
+        return await self._request("POST", "/postgres", json=spec)
+
+    async def delete_postgres(self, postgres_id: str) -> None:
+        """Egy PostgreSQL-példány törlése. Visszafordíthatatlan!"""
+        await self._request("DELETE", f"/postgres/{postgres_id}")
+
     async def get_service(self, service_id: str) -> dict[str, Any]:
         """Egy webszolgáltatás adatai."""
         return await self._request("GET", f"/services/{service_id}")
+
+    async def set_env_var(self, service_id: str, key: str, value: str) -> None:
+        """Egyetlen környezeti változó beállítása; a többi változatlan marad."""
+        await self._request("PUT", f"/services/{service_id}/env-vars/{key}", json={"value": value})
+
+    async def trigger_deploy(self, service_id: str) -> dict[str, Any]:
+        """Új telepítés indítása; a telepítés adatait (azonosító, állapot) adja vissza."""
+        return await self._request(
+            "POST", f"/services/{service_id}/deploys", json={"clearCache": "do_not_clear"}
+        )
+
+    async def get_deploy(self, service_id: str, deploy_id: str) -> dict[str, Any]:
+        """Egy telepítés aktuális állapota."""
+        return await self._request("GET", f"/services/{service_id}/deploys/{deploy_id}")
 
     # --- belső működés ------------------------------------------------
 

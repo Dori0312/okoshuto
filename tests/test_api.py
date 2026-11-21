@@ -100,3 +100,34 @@ def test_kidobas_torli_a_termeket_es_a_naplojat(client, test_session_factory):
 
     # Másodszori törlés: már nincs ilyen termék
     assert client.delete(f"/products/{termek['id']}").status_code == 404
+
+
+def test_karbantartasi_modban_az_iras_tiltott_az_olvasas_nem(client, monkeypatch):
+    from backend.config import get_settings
+
+    monkeypatch.setenv("MAINTENANCE_MODE", "true")
+    get_settings.cache_clear()
+    try:
+        valasz = client.post("/products", json={
+            "name": "Tej", "category_id": 1, "quantity": 1, "unit": "l",
+        })
+        assert valasz.status_code == 503
+        assert client.get("/products").status_code == 200
+        assert client.get("/health").json()["maintenance"] is True
+    finally:
+        get_settings.cache_clear()  # a többi teszt újra a normál beállítást kapja
+
+    def test_karbantartasi_modban_az_iras_tiltott_az_olvasas_nem(client, monkeypatch):
+        from backend.config import get_settings
+
+    monkeypatch.setenv("MAINTENANCE_MODE", "true")
+    get_settings.cache_clear()
+    try:
+        valasz = client.post("/products", json={
+            "name": "Tej", "category_id": 1, "quantity": 1, "unit": "l",
+        })
+        assert valasz.status_code == 503
+        assert client.get("/products").status_code == 200
+        assert client.get("/health").json()["maintenance"] is True
+    finally:
+        get_settings.cache_clear()  # a többi teszt újra a normál beállítást kapja

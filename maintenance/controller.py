@@ -2,6 +2,10 @@
 
 Indítás a projekt gyökeréből:
     python -m maintenance.controller check
+    python -m maintenance.controller resources
+    python -m maintenance.controller backup
+    python -m maintenance.controller replace --confirm-delete <régi dpg-azonosító>
+    python -m maintenance.controller replace --resume --confirm-delete <régi dpg-azonosító>
 """
 
 import argparse
@@ -15,11 +19,12 @@ import httpx
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
-from backend.database import make_engine
-from maintenance.backup import create_backup, read_backup, restore_backup, verify_restore
+from maintenance.backup import backup_and_verify
 from maintenance.config import MaintenanceSettings
 from maintenance.decisions import DbStatus, Decision, decide, parse_render_datetime
 from maintenance.render_api import RenderApiError, RenderClient
+from maintenance.replace import ReplaceError, run_replace
+from maintenance.state import STATE_FILE, ReplaceLock, load_state
 
 LOG_FILE = Path(__file__).with_name("maintenance.log")
 BACKUP_DIR = Path("backups")
@@ -33,6 +38,11 @@ def setup_logging() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         handlers=[logging.StreamHandler(), logging.FileHandler(LOG_FILE, encoding="utf-8")],
     )
+
+
+def active_postgres_id(settings: MaintenanceSettings) -> str:
+    """Az aktív adatbázis: egy sikeres csere után az állapotfájlból, különben a .env-ből."""
+    return load_state(STATE_FILE).active_postgres_id or settings.render_postgres_id
 
 
 async def fetch_db_status(render: RenderClient, postgres_id: str) -> DbStatus:
@@ -62,7 +72,7 @@ async def check_backend(backend_url: str, timeout: float) -> bool:
     except httpx.TransportError as exc:
         logger.warning("A backend nem érhető el: %s", type(exc).__name__)
         return False
-    logger.info("Backend /health: HTTP %s", response.status_code)
+    logger.info("Backend /health: HTTP %s %s", response.status_code, response.text)
     return response.status_code == 200
 
 
@@ -72,7 +82,7 @@ async def check_status(settings: MaintenanceSettings) -> Decision:
         settings.render_api_key, settings.http_timeout, settings.max_retries
     ) as render:
         db, backend_ok = await asyncio.gather(
-            fetch_db_status(render, settings.render_postgres_id),
+            fetch_db_status(render, active_postgres_id(settings)),
             check_backend(settings.backend_url, settings.http_timeout),
         )
     decision = decide(
@@ -85,46 +95,17 @@ async def check_status(settings: MaintenanceSettings) -> Decision:
     return decision
 
 
-def backup_and_verify(db_url: str, source_id: str) -> Path:
-    """Mentés a forrásból, majd ellenőrzés egy elkülönített, helyi próba-adatbázisban.
-
-    1. a forrás teljes tartalmának mentése JSON-fájlba (backups/ mappa)
-    2. a mentés visszaállítása egy új, üres helyi SQLite-adatbázisba
-    3. a visszaállított adatok összevetése a mentéssel
-    """
-    source = make_engine(db_url)
-    try:
-        path = create_backup(source, source_id, BACKUP_DIR)
-    finally:
-        source.dispose()
-
-    backup = read_backup(path)
-    trial_path = BACKUP_DIR / f"{path.stem}_proba.db"
-    trial = make_engine(f"sqlite:///{trial_path.as_posix()}")
-    try:
-        restore_backup(trial, backup)
-        problems = verify_restore(trial, backup)
-    finally:
-        trial.dispose()
-
-    if problems:
-        for problem in problems:
-            logger.error("Ellenőrzési hiba: %s", problem)
-        raise RuntimeError("A mentés ellenőrzése sikertelen; a próba-adatbázis megmaradt: " + str(trial_path))
-    trial_path.unlink()
-    logger.info("A mentés ellenőrizve: a helyi próbavisszaállítás sikeres.")
-    return path
-
-
 async def run_backup(settings: MaintenanceSettings) -> Path:
     """Lekéri az adatbázis kapcsolódási címét a Render API-tól, majd ment és ellenőriz."""
+    postgres_id = active_postgres_id(settings)
     async with RenderClient(
         settings.render_api_key, settings.http_timeout, settings.max_retries
     ) as render:
-        info = await render.get_postgres_connection_info(settings.render_postgres_id)
-    db_url = info["externalConnectionString"]
+        info = await render.get_postgres_connection_info(postgres_id)
     # Az adatbázis-műveletek szinkronok: külön szálon futnak, hogy ne blokkolják az eseményhurkot.
-    return await asyncio.to_thread(backup_and_verify, db_url, settings.render_postgres_id)
+    return await asyncio.to_thread(
+        backup_and_verify, info["externalConnectionString"], postgres_id, BACKUP_DIR
+    )
 
 
 async def show_resources(settings: MaintenanceSettings) -> None:
@@ -149,15 +130,25 @@ async def show_resources(settings: MaintenanceSettings) -> None:
                 "Adatbázis: %s | id: %s | állapot: %s",
                 db.get("name"), db.get("id"), db.get("status"),
             )
+    logger.info("Aktív adatbázis a vezérlő szerint: %s", active_postgres_id(settings))
+
+
+async def replace_database(settings: MaintenanceSettings, confirm_delete: str | None, resume: bool) -> None:
+    """Az adatbázis-csere indítása vagy folytatása, zárolással (egyszerre csak egy fut)."""
+    with ReplaceLock():
+        state = load_state(STATE_FILE)
+        await run_replace(settings, state, STATE_FILE, BACKUP_DIR, confirm_delete, resume)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Az Okoshűtő karbantartó vezérlője")
     parser.add_argument(
         "command",
-        choices=["check", "resources", "backup"],
-        help="check: állapotellenőrzés; resources: elérhető erőforrások; backup: mentés és ellenőrzés",
+        choices=["check", "resources", "backup", "replace"],
+        help="check: állapot; resources: erőforrások; backup: mentés; replace: adatbázis-csere",
     )
+    parser.add_argument("--confirm-delete", metavar="DPG_ID", help="engedély a régi példány törlésére")
+    parser.add_argument("--resume", action="store_true", help="egy megszakított csere folytatása")
     args = parser.parse_args()
 
     setup_logging()
@@ -175,7 +166,9 @@ def main() -> int:
             asyncio.run(show_resources(settings))
         elif args.command == "backup":
             asyncio.run(run_backup(settings))
-    except (RenderApiError, RuntimeError, OSError, SQLAlchemyError) as exc:
+        elif args.command == "replace":
+            asyncio.run(replace_database(settings, args.confirm_delete, args.resume))
+    except (RenderApiError, ReplaceError, RuntimeError, OSError, SQLAlchemyError) as exc:
         logger.error("A művelet leállt: %s", exc)
         return 1
     return 0

@@ -14,13 +14,18 @@ from sqlalchemy import Date, DateTime, Engine, func, select, text
 from sqlalchemy.orm import Session
 
 from backend import rules
-from backend.database import Base, init_db
+from backend.database import Base, init_db, make_engine
 from backend.models import Category, ConsumptionLog, Product
 from backend.services import FridgeService
 
 logger = logging.getLogger(__name__)
 
 BACKUP_FORMAT_VERSION = 1
+
+
+class TargetNotEmptyError(RuntimeError):
+    """A céladatbázisban már vannak alkalmazási adatok."""
+
 # A sorrend számít: előbb a hivatkozott tábla, utána a hivatkozó (idegen kulcsok).
 TABLES = [Category, Product, ConsumptionLog]
 
@@ -136,7 +141,7 @@ def restore_backup(engine: Engine, backup: dict[str, Any]) -> None:
     with Session(engine) as session, session.begin():
         for model in TABLES:
             if session.scalar(select(func.count()).select_from(model)):
-                raise RuntimeError(
+                raise TargetNotEmptyError(
                     f"A céladatbázis nem üres ({model.__tablename__}); a visszaállítás leállt."
                 )
         for model in TABLES:
@@ -201,3 +206,60 @@ def _probe_id_generation(engine: Engine, backup: dict[str, Any]) -> list[str]:
         finally:
             session.rollback()
     return problems
+
+
+
+
+# --- összetett műveletek ---------------------------------------------------
+
+def backup_and_verify(db_url: str, source_id: str, backup_dir: Path) -> Path:
+    """Mentés a forrásból, majd ellenőrzés egy elkülönített, helyi próba-adatbázisban.
+
+    1. a forrás teljes tartalmának mentése JSON-fájlba
+    2. a mentés visszaállítása egy új, üres helyi SQLite-adatbázisba
+    3. a visszaállított adatok összevetése a mentéssel
+    """
+    source = make_engine(db_url)
+    try:
+        path = create_backup(source, source_id, backup_dir)
+    finally:
+        source.dispose()
+
+    backup = read_backup(path)
+    trial_path = backup_dir / f"{path.stem}_proba.db"
+    trial = make_engine(f"sqlite:///{trial_path.as_posix()}")
+    try:
+        restore_backup(trial, backup)
+        problems = verify_restore(trial, backup)
+    finally:
+        trial.dispose()
+
+    if problems:
+        for problem in problems:
+            logger.error("Ellenőrzési hiba: %s", problem)
+        raise RuntimeError(f"A mentés ellenőrzése sikertelen; a próba-adatbázis megmaradt: {trial_path}")
+    trial_path.unlink()
+    logger.info("A mentés ellenőrizve: a helyi próbavisszaállítás sikeres.")
+    return path
+
+
+def restore_and_verify(db_url: str, backup: dict[str, Any]) -> None:
+    """Visszaállítás a cél-adatbázisba és ellenőrzés.
+
+    Ha a cél már tartalmazza az adatokat (pl. egy megszakított futás után),
+    nem ír újra, csak ellenőriz.
+    """
+    target = make_engine(db_url)
+    try:
+        try:
+            restore_backup(target, backup)
+        except TargetNotEmptyError:
+            logger.warning("A cél-adatbázis nem üres; csak ellenőrzés következik.")
+        problems = verify_restore(target, backup)
+    finally:
+        target.dispose()
+    if problems:
+        for problem in problems:
+            logger.error("Ellenőrzési hiba: %s", problem)
+        raise RuntimeError("Az új adatbázis tartalma nem egyezik a mentéssel.")
+    logger.info("Az új adatbázis ellenőrizve: tartalom, kapcsolatok, szabály és azonosítók rendben.")

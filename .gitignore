@@ -8,3 +8,5 @@ __pycache__/
 maintenance/state.json
 backups/
 maintenance/maintenance.log
+maintenance/replace.lock
+maintenance/state.tmp
