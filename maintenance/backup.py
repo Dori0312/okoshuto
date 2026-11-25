@@ -208,8 +208,6 @@ def _probe_id_generation(engine: Engine, backup: dict[str, Any]) -> list[str]:
     return problems
 
 
-
-
 # --- összetett műveletek ---------------------------------------------------
 
 def backup_and_verify(db_url: str, source_id: str, backup_dir: Path) -> Path:

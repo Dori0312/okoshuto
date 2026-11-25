@@ -7,11 +7,13 @@ Az állapot független a cserélendő adatbázistól és a backendtől: helyi f�
 import json
 import os
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 STATE_FILE = Path(__file__).with_name("state.json")
 LOCK_FILE = Path(__file__).with_name("replace.lock")
+SCHEDULER_LOCK_FILE = Path(__file__).with_name("scheduler.lock")
 
 
 @dataclass
@@ -59,6 +61,13 @@ def save_state(state: ControllerState, path: Path = STATE_FILE) -> None:
     os.replace(temp, path)
 
 
+def last_replaced_at(state: ControllerState) -> datetime | None:
+    """Az utolsó sikeres csere befejezésének időpontja (ha volt)."""
+    if state.run is None or state.run.status != "completed" or not state.run.finished_at:
+        return None
+    return datetime.fromisoformat(state.run.finished_at)
+
+
 class ReplaceLock:
     """Biztosítja, hogy egyszerre csak egy csere fusson (zárolófájllal)."""
 
@@ -70,7 +79,7 @@ class ReplaceLock:
             fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError:
             raise RuntimeError(
-                f"Már fut egy csere (zárolófájl: {self.path}). Ha biztosan nem fut, töröld a fájlt."
+                f"Már fut egy példány (zárolófájl: {self.path}). Ha biztosan nem fut, töröld a fájlt."
             ) from None
         os.write(fd, str(os.getpid()).encode())
         os.close(fd)

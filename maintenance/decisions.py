@@ -46,16 +46,17 @@ def decide(
     now: datetime,
     warning_days: int,
     planned_at: datetime | None = None,
+    last_replaced_at: datetime | None = None,
 ) -> Decision:
     """Eldönti, kell-e adatbázis-cserét indítani.
 
     - Ha az állapot nem kérdezhető le: VÁRAKOZÁS (kapcsolódási hiba nem indokol cserét).
     - Ha a példány nem 'available': VÁRAKOZÁS (nem cserélünk vakon).
-    - Ha elérkezett a tervezett karbantartás ideje: CSERE.
+    - Ha elérkezett a tervezett karbantartás ideje, és azóta még nem volt csere: CSERE.
     - Ha a lejáratig legfeljebb warning_days nap van hátra: CSERE.
     - Egyébként: NINCS TEENDŐ.
     """
-    for moment in (now, db.expires_at, planned_at):
+    for moment in (now, db.expires_at, planned_at, last_replaced_at):
         if moment is not None and moment.tzinfo is None:
             raise ValueError("Az időpontoknak időzónával (UTC) kell érkezniük.")
     if warning_days < 0:
@@ -65,11 +66,14 @@ def decide(
         return Decision(Action.WAIT, "Az állapot nem kérdezhető le; ez önmagában nem indokol cserét.")
     if db.status != "available":
         return Decision(Action.WAIT, f"A példány állapota: {db.status}; csere nem indítható.")
-    if planned_at is not None and now >= planned_at:
+    planned_done = last_replaced_at is not None and planned_at is not None and last_replaced_at >= planned_at
+    if planned_at is not None and now >= planned_at and not planned_done:
         return Decision(Action.REPLACE, f"Elérkezett a tervezett karbantartás ({planned_at.isoformat()}).")
     if db.expires_at is not None:
         days_left = (db.expires_at - now).total_seconds() / 86400
         if days_left <= warning_days:
             return Decision(Action.REPLACE, f"Közelgő lejárat: {days_left:.1f} nap van hátra.")
         return Decision(Action.NONE, f"A lejáratig {days_left:.1f} nap van hátra.")
-    return Decision(Action.NONE, "Nincs lejárati adat, és nincs tervezett karbantartás.")
+    if planned_done:
+        return Decision(Action.NONE, "A tervezett karbantartás már teljesült, és nincs lejárati adat.")
+    return Decision(Action.NONE, "Nincs lejárati adat, és nincs esedékes karbantartás.")

@@ -25,3 +25,5 @@ class MaintenanceSettings(BaseSettings):
     deploy_timeout_seconds: float = 900.0
     postgres_timeout_seconds: float = 900.0
     drain_seconds: float = 15.0
+    check_interval_minutes: float = 60.0
+    replace_confirm_delete: str | None = None  # előzetes engedély az időzített cseréhez

@@ -10,3 +10,4 @@ backups/
 maintenance/maintenance.log
 maintenance/replace.lock
 maintenance/state.tmp
+maintenance/scheduler.lock
